@@ -18,6 +18,7 @@ Puntos clave del diseño (ver spec del proyecto):
 
 from __future__ import annotations
 
+import operator
 from typing import Annotated, Optional, TypedDict
 
 from langgraph.graph.message import add_messages
@@ -37,7 +38,8 @@ class ResultadoMultimedia(TypedDict, total=False):
 
 
 class ResultadoAprendizaje(TypedDict, total=False):
-    explicacion_pedagogica: str  # texto del "profesor", se streamea token a token
+    puntos_clave: list[str]  # los 3 puntos más importantes, frases cortas
+    explicacion_detallada: str  # desarrollo pedagógico completo, tono de profesor
     desde_cache: bool
     ok: bool
 
@@ -66,7 +68,7 @@ class AgentState(TypedDict):
     resultado_aprendizaje: Optional[ResultadoAprendizaje]
 
     # --- Trazabilidad del loop interno del Investigador (se acumula, no se sobrescribe) ---
-    pasos_investigacion: Annotated[list[PasoInvestigacion], add_messages]
+    pasos_investigacion: Annotated[list[PasoInvestigacion], operator.add]
 
     # --- Salida final ---
     fuentes: Optional[list[str]]

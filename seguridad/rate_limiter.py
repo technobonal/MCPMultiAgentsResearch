@@ -140,9 +140,17 @@ class RateLimiter:
         return None
 
 
-def estimar_tokens(messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None) -> int:
-    """Estimación de tokens vía tiktoken; cae a ~4 caracteres/token si no está disponible."""
-    texto_total = " ".join(str(m.get("content") or "") for m in messages)
+def estimar_tokens(messages: list[Any], tools: list[dict[str, Any]] | None = None) -> int:
+    """Estimación de tokens vía tiktoken; cae a ~4 caracteres/token si no está disponible.
+    Soporta tanto dicts ({"role": ..., "content": ...}) como objetos
+    BaseMessage de langchain_core (SystemMessage, HumanMessage, ToolMessage, etc.),
+    porque supervisor.py usa dicts y agente_investigador.py usa BaseMessage."""
+    def _contenido(m: Any) -> str:
+        if isinstance(m, dict):
+            return str(m.get("content") or "")
+        return str(getattr(m, "content", "") or "")
+
+    texto_total = " ".join(_contenido(m) for m in messages)
     if tools:
         import json
         texto_total += " " + json.dumps(tools, ensure_ascii=False)
