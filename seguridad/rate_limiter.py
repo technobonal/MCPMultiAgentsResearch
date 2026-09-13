@@ -1,0 +1,155 @@
+"""
+seguridad/rate_limiter.py
+
+Rate limiter multi-modelo compartido entre los 3 agentes del sistema
+(Investigador, Multimedia, Aprendizaje). Como el supervisor hace
+fan-out y los 3 pueden llamar a Groq casi al mismo tiempo, una sola
+instancia de RateLimiter (no una por agente) es la que lleva la cuenta
+real de cupo disponible por modelo — evita que los 3 agentes intenten
+usar el mismo modelo "creyendo" cada uno que tiene cupo libre.
+
+Adaptado de DataQualityAgent (security/rate_limiter.py): misma lógica
+de ventana deslizante por modelo (TPM + RPM), pero sin dependencia de
+litellm para estimar tokens (este proyecto no usa litellm) — se
+reemplaza por tiktoken, ya presente como dependencia de langchain-openai.
+"""
+
+from __future__ import annotations
+
+import time
+from collections import deque
+from dataclasses import dataclass, field
+from typing import Any
+
+try:
+    import tiktoken
+    _ENCODER = tiktoken.get_encoding("cl100k_base")
+except Exception:
+    _ENCODER = None
+
+# Límites reales confirmados del free tier de Groq para la cadena de
+# este proyecto (openai/gpt-oss-120b -> openai/gpt-oss-20b ->
+# qwen/qwen3.6-27b). Si la cuenta cambia de plan, actualizar acá.
+MODEL_TPM_LIMITS: dict[str, int] = {
+    "openai/gpt-oss-120b": 8000,
+    "openai/gpt-oss-20b": 8000,
+    "qwen/qwen3.6-27b": 8000,  # PREVIEW en Groq: puede discontinuarse sin aviso
+}
+MODEL_RPM_LIMITS: dict[str, int] = {
+    "openai/gpt-oss-120b": 30,
+    "openai/gpt-oss-20b": 30,
+    "qwen/qwen3.6-27b": 30,
+}
+_FALLBACK_TPM_LIMIT = 6000
+_FALLBACK_RPM_LIMIT = 30
+_DEFAULT_SAFETY_MARGIN = 0.8
+_WINDOW_SECONDS = 60
+
+
+@dataclass
+class _VentanaModelo:
+    tpm_limit: int
+    rpm_limit: int = _FALLBACK_RPM_LIMIT
+    safety_margin: float = _DEFAULT_SAFETY_MARGIN
+    window_seconds: int = _WINDOW_SECONDS
+    _historial: deque = field(default_factory=deque, repr=False)
+    _historial_requests: deque = field(default_factory=deque, repr=False)
+
+    @property
+    def presupuesto_efectivo(self) -> int:
+        return int(self.tpm_limit * self.safety_margin)
+
+    @property
+    def rpm_efectivo(self) -> int:
+        return max(1, int(self.rpm_limit * self.safety_margin))
+
+    def _limpiar_historial(self) -> None:
+        ahora = time.monotonic()
+        while self._historial and (ahora - self._historial[0][0]) > self.window_seconds:
+            self._historial.popleft()
+
+    def _limpiar_historial_requests(self) -> None:
+        ahora = time.monotonic()
+        while self._historial_requests and (ahora - self._historial_requests[0]) > self.window_seconds:
+            self._historial_requests.popleft()
+
+    def tokens_usados(self) -> int:
+        self._limpiar_historial()
+        return sum(tokens for _, tokens in self._historial)
+
+    def requests_usados(self) -> int:
+        self._limpiar_historial_requests()
+        return len(self._historial_requests)
+
+    def puede_proceder(self, tokens_estimados: int) -> bool:
+        tpm_ok = (self.tokens_usados() + tokens_estimados) <= self.presupuesto_efectivo
+        rpm_ok = self.requests_usados() < self.rpm_efectivo
+        return tpm_ok and rpm_ok
+
+    def registrar_uso(self, tokens: int) -> None:
+        self._historial.append((time.monotonic(), tokens))
+        self._limpiar_historial()
+
+    def registrar_request(self) -> None:
+        self._historial_requests.append(time.monotonic())
+        self._limpiar_historial_requests()
+
+
+@dataclass
+class RateLimiter:
+    """
+    Instancia ÚNICA, compartida entre los 3 agentes (no una por sesión
+    ni por agente) — se crea una sola vez al arrancar app.py y se pasa
+    por referencia a cada agente.
+    """
+    model_limits: dict[str, int] = field(default_factory=lambda: dict(MODEL_TPM_LIMITS))
+    model_rpm_limits: dict[str, int] = field(default_factory=lambda: dict(MODEL_RPM_LIMITS))
+    safety_margin: float = _DEFAULT_SAFETY_MARGIN
+    window_seconds: int = _WINDOW_SECONDS
+    _ventanas: dict[str, _VentanaModelo] = field(default_factory=dict, repr=False)
+
+    def _ventana(self, model: str) -> _VentanaModelo:
+        if model not in self._ventanas:
+            tpm = self.model_limits.get(model, _FALLBACK_TPM_LIMIT)
+            rpm = self.model_rpm_limits.get(model, _FALLBACK_RPM_LIMIT)
+            self._ventanas[model] = _VentanaModelo(
+                tpm_limit=tpm, rpm_limit=rpm,
+                safety_margin=self.safety_margin, window_seconds=self.window_seconds,
+            )
+        return self._ventanas[model]
+
+    def cabe_en_limite_absoluto(self, model: str, tokens_estimados: int) -> bool:
+        return tokens_estimados <= self._ventana(model).presupuesto_efectivo
+
+    def filtrar_modelos_viables(self, cadena: list[str], tokens_estimados: int) -> list[str]:
+        return [m for m in cadena if self.cabe_en_limite_absoluto(m, tokens_estimados)]
+
+    def puede_proceder(self, model: str, tokens_estimados: int) -> bool:
+        return self._ventana(model).puede_proceder(tokens_estimados)
+
+    def registrar_uso(self, model: str, tokens: int) -> None:
+        self._ventana(model).registrar_uso(tokens)
+
+    def registrar_request(self, model: str) -> None:
+        self._ventana(model).registrar_request()
+
+    def siguiente_modelo_disponible(self, cadena: list[str], tokens_estimados: int) -> str | None:
+        for modelo in cadena:
+            if self.puede_proceder(modelo, tokens_estimados):
+                return modelo
+        return None
+
+
+def estimar_tokens(messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None) -> int:
+    """Estimación de tokens vía tiktoken; cae a ~4 caracteres/token si no está disponible."""
+    texto_total = " ".join(str(m.get("content") or "") for m in messages)
+    if tools:
+        import json
+        texto_total += " " + json.dumps(tools, ensure_ascii=False)
+
+    if _ENCODER is not None:
+        try:
+            return len(_ENCODER.encode(texto_total))
+        except Exception:
+            pass
+    return max(1, len(texto_total) // 4)
