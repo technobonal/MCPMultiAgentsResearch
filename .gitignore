@@ -1,0 +1,11 @@
+venv/
+.env
+.web/
+chroma_db/
+checkpoints.sqlite
+__pycache__/
+*.pyc
+*.pyo
+.vscode/
+.idea/
+.DS_Store
