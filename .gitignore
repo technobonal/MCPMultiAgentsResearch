@@ -9,3 +9,5 @@ __pycache__/
 .vscode/
 .idea/
 .DS_Store
+checkpoints.sqlite-shm
+checkpoints.sqlite-wal

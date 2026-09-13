@@ -14,7 +14,7 @@ Escribe en resultado_multimedia, según el contrato de agent_state.py.
 from __future__ import annotations
 
 from agent_state import AgentState, ResultadoMultimedia
-from Cliente_agemte import conectar_mcp, obtener_tools_langchain
+from Cliente_agemte import conectar_mcp, obtener_tools_langchain, extraer_texto_resultado
 from llm_client import get_llm
 from seguridad.rate_limiter import RateLimiter
 
@@ -65,7 +65,8 @@ def construir_nodo_multimedia(rate_limiter: RateLimiter):
             if respuesta.tool_calls:
                 tool_call = respuesta.tool_calls[0]
                 tool = tools_multimedia[0]
-                texto_resultado = await tool.ainvoke(tool_call["args"])
+                resultado_crudo = await tool.ainvoke(tool_call["args"])
+                texto_resultado = extraer_texto_resultado(resultado_crudo)
 
         urls = _parsear_urls(texto_resultado)
 
@@ -75,4 +76,4 @@ def construir_nodo_multimedia(rate_limiter: RateLimiter):
         }
         return {"resultado_multimedia": resultado}
 
-    return nodo_multimediasolo
+    return nodo_multimedia

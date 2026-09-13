@@ -1,11 +1,18 @@
 """
 agentes/agente_aprendizaje.py
-(docstring sin cambios respecto a la versión anterior)
+
+Fase 1 (paralela, sin ruta directa a respuesta_final): consulta Chroma
+por tema_consulta en la colección "conocimiento_aprendido". Si hay
+match, escribe resultado_aprendizaje directo desde el estado
+compartido -- no hace falta llamar al LLM.
+
+Fase 2 (después de investigador): si Fase 1 no encontró nada, toma
+resultado_investigador, genera una explicación pedagógica (rol de
+"profesor") y la guarda en Chroma para que futuras consultas similares
+peguen en Fase 1.
 """
 
 from __future__ import annotations
-from pydoc import doc
-from annotated_types import doc
 
 from pydantic import BaseModel, Field
 
@@ -34,9 +41,8 @@ class ExplicacionPedagogica(BaseModel):
 
 
 def _armar_contenido_embebido(explicacion: ExplicacionPedagogica) -> str:
-    """Texto que se guarda/embebe en Chroma: puntos clave a modo de
-    resumen arriba, desarrollo completo abajo -- mejora la densidad
-    semántica para retrieval futuro por similitud."""
+    """Texto que se embebe en Chroma: puntos clave arriba, desarrollo
+    completo abajo -- mejora la densidad semántica para retrieval futuro."""
     puntos = "\n".join(f"- {p}" for p in explicacion.puntos_clave)
     return f"{puntos}\n\n{explicacion.explicacion_detallada}"
 
@@ -50,26 +56,12 @@ def construir_nodo_aprendizaje_fase1(rate_limiter: RateLimiter):
             return {}
 
         doc = resultados_cache[0]
-        # doc.page_content tiene el formato armado por _armar_contenido_embebido:
-        # las líneas "- ..." al principio son los puntos clave, el resto es el
-        # desarrollo. Se reconstruye separando por el primer bloque en blanco.
-        bloques = doc.page_content.split("\n\n", 1)
-        puntos_texto = bloques[0] if bloques else ""
-        desarrollo = bloques[1] if len(bloques) > 1 else ""
-        puntos_clave = [
-            linea.lstrip("- ").strip()
-            for linea in puntos_texto.splitlines()
-            if linea.strip()
-        ]
-
-        doc = resultados_cache[0]
         resultado: ResultadoAprendizaje = {
             "puntos_clave": doc.metadata.get("puntos_clave", []),
             "explicacion_detallada": doc.page_content,
             "desde_cache": True,
             "ok": True,
         }
-        
         return {"resultado_aprendizaje": resultado}
 
     return nodo_aprendizaje_fase1
@@ -77,6 +69,10 @@ def construir_nodo_aprendizaje_fase1(rate_limiter: RateLimiter):
 
 def construir_nodo_aprendizaje_fase2(rate_limiter: RateLimiter):
     def nodo_aprendizaje_fase2(state: AgentState) -> dict:
+        # Si Fase 1 ya resolvió (cache hit), no hay nada que hacer acá.
+        if state.get("resultado_aprendizaje") is not None:
+            return {}
+
         investigacion = state.get("resultado_investigador")
 
         if not investigacion or not investigacion.get("ok"):
@@ -108,11 +104,8 @@ def construir_nodo_aprendizaje_fase2(rate_limiter: RateLimiter):
             contenido=contenido_embebido,
             titulo_articulo=titulo,
             tool_origen="agente_aprendizaje",
-            metadata_extra={
-                "resumen_fuente": resumen_fuente,
-                "puntos_clave": explicacion.puntos_clave,
-    },
-)
+            metadata_extra={"puntos_clave": explicacion.puntos_clave},
+        )
 
         resultado: ResultadoAprendizaje = {
             "puntos_clave": explicacion.puntos_clave,

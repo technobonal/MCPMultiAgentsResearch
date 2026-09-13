@@ -18,7 +18,7 @@ from __future__ import annotations
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from agent_state import AgentState, PasoInvestigacion, ResultadoInvestigador
-from Cliente_agemte import conectar_mcp, obtener_tools_langchain
+from Cliente_agemte import conectar_mcp, obtener_tools_langchain, extraer_texto_resultado
 from llm_client import get_llm
 from seguridad.rate_limiter import RateLimiter
 
@@ -33,16 +33,6 @@ exacto de un artículo a partir de una consulta) y obtener_resumen
 Tu objetivo es conseguir un resumen útil sobre el tema pedido. Si no
 conocés el título exacto, usá primero buscar_articulos; una vez que
 tengas un título, llamá a obtener_resumen con ese título."""
-
-
-def _extraer_texto_resultado(resultado_tool) -> str:
-    """load_mcp_tools devuelve el contenido como lista de dicts
-    [{'type': 'text', 'text': '...'}] -- extrae el texto plano."""
-    if isinstance(resultado_tool, list) and resultado_tool:
-        primero = resultado_tool[0]
-        if isinstance(primero, dict) and "text" in primero:
-            return primero["text"]
-    return str(resultado_tool)
 
 
 def construir_nodo_investigador(rate_limiter: RateLimiter):
@@ -82,7 +72,7 @@ def construir_nodo_investigador(rate_limiter: RateLimiter):
                 for tool_call in respuesta.tool_calls:
                     tool = next(t for t in tools_investigador if t.name == tool_call["name"])
                     resultado_crudo = await tool.ainvoke(tool_call["args"])
-                    texto_resultado = _extraer_texto_resultado(resultado_crudo)
+                    texto_resultado = extraer_texto_resultado(resultado_crudo)
 
                     mensajes.append(ToolMessage(content=texto_resultado, tool_call_id=tool_call["id"]))
 

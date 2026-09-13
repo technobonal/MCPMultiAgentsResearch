@@ -1,3 +1,11 @@
+"""
+Cliente_agemte.py
+
+Cliente MCP reusable: conexión a servidor_wiki.py + carga de tools
+para LangChain + interpretación de resultados. Los 3 agentes importan
+estas funciones en vez de reimplementar la conexión cada uno.
+"""
+
 import asyncio
 from contextlib import asynccontextmanager
 
@@ -11,10 +19,6 @@ async def conectar_mcp():
     """
     Conecta con el servidor MCP de Wikipedia (servidor_wiki.py) vía stdio
     y entrega una ClientSession ya inicializada, lista para usar.
-
-    Uso desde cualquier agente:
-        async with conectar_mcp() as sesion:
-            tools = await obtener_tools_langchain(sesion)
     """
     parametros_servidor = StdioServerParameters(
         command="python",
@@ -30,21 +34,27 @@ async def conectar_mcp():
 async def obtener_tools_langchain(sesion: ClientSession):
     """
     Carga las tools expuestas por servidor_wiki.py ya envueltas como
-    BaseTool de LangChain (buscar_articulos, obtener_resumen,
-    obtener_imagenes, aprender_algo_nuevo), listas para bind_tools().
-
-    Cada agente decide cuáles usar filtrando esta lista por nombre
-    (aislamiento por capacidades: cada agente solo se queda con las
-    tools que le corresponden).
+    BaseTool de LangChain, listas para bind_tools().
     """
     return await load_mcp_tools(sesion)
+
+
+# --- NUEVA: acá va la función que agregamos ---
+def extraer_texto_resultado(resultado_tool) -> str:
+    """load_mcp_tools devuelve el contenido como lista de dicts
+    [{'type': 'text', 'text': '...'}] -- extrae el texto plano."""
+    if isinstance(resultado_tool, list) and resultado_tool:
+        primero = resultado_tool[0]
+        if isinstance(primero, dict) and "text" in primero:
+            return primero["text"]
+    return str(resultado_tool)
+# --- fin de la función nueva ---
 
 
 async def _prueba_conexion():
     """
     Prueba manual de conexión y listado de tools. No se usa en
-    producción — sirve para verificar que el servidor responde y que
-    langchain-mcp-adapters carga las tools correctamente.
+    producción -- sirve para verificar que el servidor responde.
     """
     print("Iniciando conexión con el Servidor MCP...")
 
@@ -65,7 +75,7 @@ async def _prueba_conexion():
         resultado = await tool_busqueda.ainvoke({"consulta": tema_a_buscar})
 
         print("📄 Datos devueltos:")
-        print(resultado)
+        print(extraer_texto_resultado(resultado))
 
 
 if __name__ == "__main__":
