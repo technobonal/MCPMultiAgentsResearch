@@ -14,7 +14,7 @@ from rag.embeddings import obtener_embeddings
 
 DIRECTORIO_CHROMA = "./chroma_db"
 NombreColeccion = Literal["wikipedia_resumenes", "conocimiento_aprendido"]
-UMBRAL_SIMILITUD = 0.75
+UMBRAL_SIMILITUD = 0.90
 
 _vectorstores: dict[str, Chroma] = {}
 

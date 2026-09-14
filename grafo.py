@@ -71,13 +71,21 @@ def nodo_respuesta_final(state: AgentState) -> dict:
     fuentes = []
 
     aprendizaje = state.get("resultado_aprendizaje")
-    if aprendizaje and aprendizaje.get("ok"):
-        puntos = "\n".join(f"- {p}" for p in aprendizaje.get("puntos_clave", []))
-        partes.append(f"{puntos}\n\n{aprendizaje['explicacion_detallada']}")
-
     investigacion = state.get("resultado_investigador")
+
+    if aprendizaje and aprendizaje.get("ok"):
+        puntos_unicos = list(dict.fromkeys(aprendizaje.get("puntos_clave", [])))  # dedup preservando orden
+        puntos = "\n".join(f"- {p}" for p in puntos_unicos)
+        partes.append(f"## Puntos clave\n\n{puntos}\n\n## Explicación\n\n{aprendizaje['explicacion_detallada']}")
+    elif investigacion and investigacion.get("ok"):
+        partes.append(investigacion["resumen"])
+
     if investigacion and investigacion.get("fuente"):
         fuentes.append(investigacion["fuente"])
+
+    multimedia = state.get("resultado_multimedia")
+    if not partes and multimedia and multimedia.get("ok"):
+        partes.append("Acá tenés las imágenes que encontré.")
 
     return {
         "respuesta_final": "\n\n".join(partes) if partes else "No se encontró información.",

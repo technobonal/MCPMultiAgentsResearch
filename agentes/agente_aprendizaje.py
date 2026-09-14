@@ -56,6 +56,17 @@ def construir_nodo_aprendizaje_fase1(rate_limiter: RateLimiter):
             return {}
 
         doc = resultados_cache[0]
+
+        # Chequeo de sanidad: el título del artículo cacheado tiene que
+        # compartir al menos una palabra significativa con el tema
+        # pedido -- defensa extra contra falsos positivos de similitud
+        # semántica entre temas relacionados pero distintos (ej. dos
+        # planetas distintos, dos personas con apellido parecido).
+        palabras_tema = set(tema.lower().split())
+        palabras_titulo = set(doc.metadata.get("titulo_articulo", "").lower().split())
+        if not (palabras_tema & palabras_titulo):
+            return {}  # no hay overlap -- tratamos como cache miss, se va a buscar de nuevo
+
         resultado: ResultadoAprendizaje = {
             "puntos_clave": doc.metadata.get("puntos_clave", []),
             "explicacion_detallada": doc.page_content,
@@ -69,7 +80,6 @@ def construir_nodo_aprendizaje_fase1(rate_limiter: RateLimiter):
 
 def construir_nodo_aprendizaje_fase2(rate_limiter: RateLimiter):
     def nodo_aprendizaje_fase2(state: AgentState) -> dict:
-        # Si Fase 1 ya resolvió (cache hit), no hay nada que hacer acá.
         if state.get("resultado_aprendizaje") is not None:
             return {}
 
@@ -77,10 +87,8 @@ def construir_nodo_aprendizaje_fase2(rate_limiter: RateLimiter):
 
         if not investigacion or not investigacion.get("ok"):
             resultado: ResultadoAprendizaje = {
-                "puntos_clave": [],
-                "explicacion_detallada": "",
-                "desde_cache": False,
-                "ok": False,
+                "puntos_clave": [], "explicacion_detallada": "",
+                "desde_cache": False, "ok": False,
             }
             return {"resultado_aprendizaje": resultado}
 
@@ -92,26 +100,32 @@ def construir_nodo_aprendizaje_fase2(rate_limiter: RateLimiter):
             {"role": "user", "content": resumen_fuente},
         ]
 
-        llm = get_llm(mensajes, rate_limiter, temperature=0.4)
-        explicacion: ExplicacionPedagogica = llm.with_structured_output(
-            ExplicacionPedagogica
-        ).invoke(mensajes)
+        try:
+            llm = get_llm(mensajes, rate_limiter, temperature=0.4)
+            explicacion: ExplicacionPedagogica = llm.with_structured_output(
+                ExplicacionPedagogica
+            ).invoke(mensajes)
+        except Exception:
+            # Falló la generación estructurada en toda la cadena (error
+            # conocido de Groq con JSON schema) -- no rompe el turno,
+            # respuesta_final cae al resumen plano del Investigador.
+            resultado: ResultadoAprendizaje = {
+                "puntos_clave": [], "explicacion_detallada": "",
+                "desde_cache": False, "ok": False,
+            }
+            return {"resultado_aprendizaje": resultado}
 
         contenido_embebido = _armar_contenido_embebido(explicacion)
-
         ingerir_documento(
-            coleccion="conocimiento_aprendido",
-            contenido=contenido_embebido,
-            titulo_articulo=titulo,
-            tool_origen="agente_aprendizaje",
+            coleccion="conocimiento_aprendido", contenido=contenido_embebido,
+            titulo_articulo=titulo, tool_origen="agente_aprendizaje",
             metadata_extra={"puntos_clave": explicacion.puntos_clave},
         )
 
         resultado: ResultadoAprendizaje = {
             "puntos_clave": explicacion.puntos_clave,
             "explicacion_detallada": explicacion.explicacion_detallada,
-            "desde_cache": False,
-            "ok": True,
+            "desde_cache": False, "ok": True,
         }
         return {"resultado_aprendizaje": resultado}
 
