@@ -49,6 +49,31 @@ def extraer_texto_resultado(resultado_tool) -> str:
             return primero["text"]
     return str(resultado_tool)
 # --- fin de la función nueva ---
+import logging
+
+logger = logging.getLogger("mcpmultiagentsresearch.cliente_mcp")
+
+MAX_REINTENTOS_CONEXION = 2  # 1 intento inicial + 2 reintentos = 3 intentos totales
+
+
+async def con_reintento_mcp(coro_factory, max_reintentos: int = MAX_REINTENTOS_CONEXION):
+    """
+    Reintenta una operación completa contra el servidor MCP (conexión +
+    trabajo) ante fallos transitorios -- ej. el subproceso de
+    servidor_wiki.py tarda en levantar o hay un hiccup de stdio.
+
+    coro_factory: función SIN argumentos que, al llamarla, devuelve la
+    corutina completa a ejecutar (típicamente envuelve el
+    `async with conectar_mcp() as sesion: ...` entero del agente).
+    """
+    ultimo_error: Exception | None = None
+    for intento in range(1, max_reintentos + 2):  # +2: 1 inicial + los reintentos
+        try:
+            return await coro_factory()
+        except Exception as e:
+            ultimo_error = e
+            logger.warning(f"[con_reintento_mcp] intento {intento} falló: {e}")
+    raise ultimo_error
 
 
 async def _prueba_conexion():

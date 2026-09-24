@@ -4,6 +4,8 @@ rag/vectorstore.py
 
 from __future__ import annotations
 
+import os
+import tempfile
 from datetime import datetime, timezone
 from typing import Any, Literal
 
@@ -12,7 +14,7 @@ from langchain_core.documents import Document
 
 from rag.embeddings import obtener_embeddings
 
-DIRECTORIO_CHROMA = "./chroma_db"
+DIRECTORIO_CHROMA = os.path.join(tempfile.gettempdir(), "mcpma_chroma_db")
 NombreColeccion = Literal["wikipedia_resumenes", "conocimiento_aprendido"]
 UMBRAL_SIMILITUD = 0.90
 

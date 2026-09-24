@@ -18,7 +18,7 @@ from __future__ import annotations
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from agent_state import AgentState, PasoInvestigacion, ResultadoInvestigador
-from Cliente_agemte import conectar_mcp, obtener_tools_langchain, extraer_texto_resultado
+from Cliente_agemte import conectar_mcp, obtener_tools_langchain, extraer_texto_resultado, con_reintento_mcp
 from llm_client import get_llm
 from seguridad.rate_limiter import RateLimiter
 
@@ -41,58 +41,70 @@ def construir_nodo_investigador(rate_limiter: RateLimiter):
     async def nodo_investigador(state: AgentState) -> dict:
         tema = state["tema_consulta"]
 
-        async with conectar_mcp() as sesion:
-            todas_las_tools = await obtener_tools_langchain(sesion)
-            tools_investigador = [t for t in todas_las_tools if t.name in TOOLS_PERMITIDAS]
+        async def _intentar():
+            async with conectar_mcp() as sesion:
+                todas_las_tools = await obtener_tools_langchain(sesion)
+                tools_investigador = [t for t in todas_las_tools if t.name in TOOLS_PERMITIDAS]
 
-            mensajes: list = [
-                SystemMessage(content=_SYSTEM_PROMPT),
-                HumanMessage(content=tema),
-            ]
+                mensajes: list = [
+                    SystemMessage(content=_SYSTEM_PROMPT),
+                    HumanMessage(content=tema),
+                ]
 
-            llm = get_llm(
-                [{"role": "system", "content": _SYSTEM_PROMPT}, {"role": "user", "content": tema}],
-                rate_limiter,
-            )
-            llm_con_tools = llm.bind_tools(tools_investigador)
+                llm = get_llm(
+                    [{"role": "system", "content": _SYSTEM_PROMPT}, {"role": "user", "content": tema}],
+                    rate_limiter,
+                )
+                llm_con_tools = llm.bind_tools(tools_investigador)
 
-            pasos: list[PasoInvestigacion] = []
-            resumen_final: str | None = None
-            fuente_final: str | None = None
+                pasos: list[PasoInvestigacion] = []
+                resumen_final: str | None = None
+                fuente_final: str | None = None
 
-            for intento in range(1, MAX_INTENTOS + 1):
-                respuesta: AIMessage = llm_con_tools.invoke(mensajes)
-                mensajes.append(respuesta)
+                for intento in range(1, MAX_INTENTOS + 1):
+                    respuesta: AIMessage = await llm_con_tools.ainvoke(mensajes)
+                    mensajes.append(respuesta)
 
-                if not respuesta.tool_calls:
-                    resumen_final = respuesta.content or None
-                    pasos.append({"intento": intento, "query": tema, "resultado_ok": bool(resumen_final)})
-                    break
+                    if not respuesta.tool_calls:
+                        resumen_final = respuesta.content or None
+                        pasos.append({"intento": intento, "query": tema, "resultado_ok": bool(resumen_final)})
+                        break
 
-                for tool_call in respuesta.tool_calls:
-                    tool = next(t for t in tools_investigador if t.name == tool_call["name"])
-                    resultado_crudo = await tool.ainvoke(tool_call["args"])
-                    texto_resultado = extraer_texto_resultado(resultado_crudo)
+                    for tool_call in respuesta.tool_calls:
+                        tool = next(t for t in tools_investigador if t.name == tool_call["name"])
+                        resultado_crudo = await tool.ainvoke(tool_call["args"])
+                        texto_resultado = extraer_texto_resultado(resultado_crudo)
 
-                    mensajes.append(ToolMessage(content=texto_resultado, tool_call_id=tool_call["id"]))
+                        mensajes.append(ToolMessage(content=texto_resultado, tool_call_id=tool_call["id"]))
 
-                    if tool_call["name"] == "obtener_resumen" and "Error" not in texto_resultado:
-                        resumen_final = texto_resultado
-                        fuente_final = tool_call["args"].get("titulo")
+                        if tool_call["name"] == "obtener_resumen" and "Error" not in texto_resultado:
+                            resumen_final = texto_resultado
+                            fuente_final = tool_call["args"].get("titulo")
 
-                pasos.append({"intento": intento, "query": tema, "resultado_ok": resumen_final is not None})
-                if resumen_final:
-                    break
+                    pasos.append({"intento": intento, "query": tema, "resultado_ok": resumen_final is not None})
+                    if resumen_final:
+                        break
 
-        resultado: ResultadoInvestigador = {
-            "resumen": resumen_final or "No se encontró información suficiente.",
-            "articulos_relacionados": [],
-            "fuente": fuente_final or tema,
-            "desde_cache": False,
-            "ok": resumen_final is not None,
-        }
+            resultado: ResultadoInvestigador = {
+                "resumen": resumen_final or "No se encontró información suficiente.",
+                "articulos_relacionados": [],
+                "fuente": fuente_final or tema,
+                "desde_cache": False,
+                "ok": resumen_final is not None,
+            }
+            return {"resultado_investigador": resultado, "pasos_investigacion": pasos}
 
-        return {"resultado_investigador": resultado, "pasos_investigacion": pasos}
+        try:
+            return await con_reintento_mcp(_intentar)
+        except Exception:
+            resultado: ResultadoInvestigador = {
+                "resumen": "No se pudo conectar con el servidor de Wikipedia.",
+                "articulos_relacionados": [],
+                "fuente": tema,
+                "desde_cache": False,
+                "ok": False,
+            }
+            return {"resultado_investigador": resultado, "pasos_investigacion": []}
 
     return nodo_investigador
 

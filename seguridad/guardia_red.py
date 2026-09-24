@@ -22,9 +22,17 @@ logger = logging.getLogger("mcpmultiagentsresearch.guardia_red")
 # Sufijos de host permitidos -- un hostname pasa si termina en alguno
 # de estos (permite subdominios, ej. cdn-lfs.huggingface.co).
 ALLOWLIST_SUFIJOS = (
-    "api.groq.com",
+     "api.groq.com",
     "huggingface.co",
     "hf.co",
+    "accounts.google.com",
+    "googleapis.com",
+    "oauth2.googleapis.com",
+    "google.com",
+    "app.posthog.com",
+    "localhost",    # <-- CRÍTICO: Para el servidor wiki y Reflex
+    "127.0.0.1",    # <-- CRÍTICO: Para comunicación de red interna
+    "0.0.0.0",
 )
 
 # Hosts locales -- necesarios para que el propio servidor de Reflex
@@ -36,9 +44,11 @@ _getaddrinfo_original = socket.getaddrinfo
 _instalada = False
 
 
-def _host_permitido(host: str | None) -> bool:
+def _host_permitido(host: str | bytes | None) -> bool:
     if host is None:
         return True
+    if isinstance(host, bytes):
+        host = host.decode("utf-8", errors="ignore")
     host = host.lower()
     if host in _HOSTS_LOCALES:
         return True

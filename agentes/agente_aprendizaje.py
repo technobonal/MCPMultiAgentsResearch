@@ -79,7 +79,7 @@ def construir_nodo_aprendizaje_fase1(rate_limiter: RateLimiter):
 
 
 def construir_nodo_aprendizaje_fase2(rate_limiter: RateLimiter):
-    def nodo_aprendizaje_fase2(state: AgentState) -> dict:
+    async def nodo_aprendizaje_fase2(state: AgentState) -> dict:
         if state.get("resultado_aprendizaje") is not None:
             return {}
 
@@ -102,9 +102,9 @@ def construir_nodo_aprendizaje_fase2(rate_limiter: RateLimiter):
 
         try:
             llm = get_llm(mensajes, rate_limiter, temperature=0.4)
-            explicacion: ExplicacionPedagogica = llm.with_structured_output(
+            explicacion: ExplicacionPedagogica = await llm.with_structured_output(
                 ExplicacionPedagogica
-            ).invoke(mensajes)
+            ).ainvoke(mensajes)
         except Exception:
             # Falló la generación estructurada en toda la cadena (error
             # conocido de Groq con JSON schema) -- no rompe el turno,
