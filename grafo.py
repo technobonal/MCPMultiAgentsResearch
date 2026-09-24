@@ -19,6 +19,9 @@ respuesta_final, manteniendo un ÚNICO punto de convergencia real.
 
 from __future__ import annotations
 
+import os
+import tempfile
+
 import aiosqlite
 
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -38,8 +41,10 @@ from seguridad.validadores import MENSAJE_RECHAZO, procesar_input_usuario
 
 
 def nodo_validacion(state: AgentState) -> dict:
+    print("[DEBUG] entrando a nodo_validacion", flush=True)
     texto_crudo = state["mensajes"][-1].content
     input_sanitizado, rechazado = procesar_input_usuario(texto_crudo)
+    print(f"[DEBUG] saliendo de nodo_validacion, rechazado={rechazado}", flush=True)
 
     if rechazado:
         return {"estado": "rechazado", "respuesta_final": MENSAJE_RECHAZO}
@@ -51,8 +56,11 @@ def enrutar_tras_validacion(state: AgentState) -> str:
 
 
 def enrutar_tras_supervisor(state: AgentState) -> list[str]:
-    if state["tipo_solicitud"] == "solo_imagenes":
+    tipo = state["tipo_solicitud"]
+    if tipo == "solo_imagenes":
         return ["multimedia_padded"]
+    if tipo == "explicacion_sin_imagen":
+        return ["investigador", "aprendizaje_fase1"]
     return ["investigador", "aprendizaje_fase1", "multimedia_padded"]
 
 
@@ -121,7 +129,8 @@ async def construir_grafo(rate_limiter: RateLimiter):
     builder.add_edge("esperar_multimedia", "respuesta_final")
     builder.add_edge("respuesta_final", END)
 
-    conexion = await aiosqlite.connect("checkpoints.sqlite")
+    ruta_checkpoints = os.path.join(tempfile.gettempdir(), "mcpma_checkpoints.sqlite")
+    conexion = await aiosqlite.connect(ruta_checkpoints)
     checkpointer = AsyncSqliteSaver(conexion)
 
     return builder.compile(checkpointer=checkpointer)
