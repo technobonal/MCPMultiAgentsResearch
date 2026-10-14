@@ -1,34 +1,34 @@
-# Copia este archivo a .env y completa los valores. NO subas .env a Git.
-
-# --- LLM (Groq) ---
-GROQ_API_KEY=
-# Opcional: cadena de fallback separada por comas
-# GROQ_MODEL_CHAIN=openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.6-27b
-
-# --- Login con Google (OAuth) ---
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
-# Único email autorizado a entrar
-ALLOWED_EMAIL=
-# Cadena aleatoria larga para firmar la sesión
-SESSION_SECRET_KEY=
-FRONTEND_URL=http://localhost:3000
-
-assets/external/
-.states
-*.py[cod]
-*.db
-.web
+# Entorno y secretos
 venv/
 .env
+
+# Reflex
+.web
 .web/
+.states
+.states/
+uploaded_files/
+reflex.lock/
+assets/external/
+
+# Datos locales
 chroma_db/
+*.db
 checkpoints.sqlite
+checkpoints.sqlite-shm
+checkpoints.sqlite-wal
+
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
+
+# Archivos de asistentes de código
+AGENTS.md
+CLAUDE.md
+
+# Editor / sistema
 .vscode/
 .idea/
 .DS_Store
-checkpoints.sqlite-shm
-checkpoints.sqlite-wal
+Thumbs.db
