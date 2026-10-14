@@ -1,0 +1,1 @@
+![Frontend de MCPMultiAgentsResearch](assets/frontend.png)
